@@ -1,15 +1,10 @@
-# database_manager.py
 import os
 import sqlite3
 import re
-
-
-# Create the database directory if it doesn't exist
-db_directory = os.path.join(os.path.dirname(__file__), 'database')
-os.makedirs(db_directory, exist_ok=True)
+from datetime import datetime
 
 # Create the path for the database file
-db_path = os.path.join(db_directory, 'master-market-database.db')
+db_path = os.path.join(os.path.dirname(__file__), 'master-market-database.db')
 
 def create_connection():
     """Create a database connection."""
@@ -19,13 +14,15 @@ def create_connection():
 def create_master_table(conn):
     """Create the master table to track all item-specific tables."""
     cursor = conn.cursor()
+
+    # Create a new master_item_history table if it doesn't exist
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS items_master (
+        CREATE TABLE IF NOT EXISTS master_item_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_name TEXT UNIQUE,
+            item_name TEXT,
             rarity TEXT,
             gold_cost INTEGER,
-            total_entries INTEGER DEFAULT 0
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     conn.commit()
@@ -34,61 +31,68 @@ def create_item_table(conn, item_name):
     """Create a unique table for the specific item."""
     cursor = conn.cursor()
     
-    # Sanitize the item name to create a valid table name
-    item_table_name = re.sub(r'[^a-zA-Z0-9_]', '_', item_name.replace(" ", "_").lower())
+    # Sanitize the item name to create a valid table name and append '_history'
+    item_table_name = re.sub(r'[^a-zA-Z0-9_]', '_', item_name.replace(" ", "_").lower()) + '_history'
     
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS {item_table_name} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             rarity TEXT NOT NULL,
-            gold_cost INTEGER NOT NULL
+            gold_cost INTEGER NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     conn.commit()
 
 def insert_item_into_master(conn, item_name, rarity, gold_cost):
-    """Insert or update item details in the items_master table."""
+    """Insert an item into the master table."""
     cursor = conn.cursor()
-    # If item already exists in items_master, update total_entries and gold_cost, else insert
+    
+    # Get the current timestamp formatted as 'YYYY-MM-DD HH:MM:SS'
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Insert a new entry with a unique ID each time, including the current timestamp
     cursor.execute('''
-        INSERT INTO items_master (item_name, rarity, gold_cost, total_entries)
-        VALUES (?, ?, ?, 1)
-        ON CONFLICT(item_name) DO UPDATE SET 
-            total_entries = total_entries + 1,
-            gold_cost = excluded.gold_cost
-    ''', (item_name, rarity, gold_cost))
+        INSERT INTO master_item_history (item_name, rarity, gold_cost, timestamp)
+        VALUES (?, ?, ?, ?)
+    ''', (item_name, rarity, gold_cost, timestamp))
+
     conn.commit()
 
 def insert_into_item_table(conn, item_name, rarity, gold_cost):
     """Insert an entry into the item's specific table."""
-    item_table_name = re.sub(r'[^a-zA-Z0-9_]', '_', item_name.replace(" ", "_").lower())
+    if gold_cost is None:
+        print(f"Warning: Skipping insertion for item '{item_name}' due to missing gold cost.")
+        return  # Skip insertion if gold_cost is None
+
+    item_table_name = re.sub(r'[^a-zA-Z0-9_]', '_', item_name.replace(" ", "_").lower()) + '_history'
     cursor = conn.cursor()
     
-    # Skip insertion if gold_cost is None
-    if gold_cost is not None:
-        cursor.execute(f'''
-            INSERT INTO {item_table_name} (rarity, gold_cost)
-            VALUES (?, ?)
-        ''', (rarity, gold_cost))
-    else:
-        print(f"Skipping insert for {item_name} due to None gold cost.")
+    # Get the current timestamp formatted as 'YYYY-MM-DD HH:MM:SS'
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Insert a new entry with the current timestamp
+    cursor.execute(f'''
+        INSERT INTO {item_table_name} (rarity, gold_cost, timestamp)
+        VALUES (?, ?, ?)
+    ''', (rarity, gold_cost, timestamp))
     
     conn.commit()
 
 def fetch_all_items(conn):
     """Fetch all items from the master table."""
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM items_master")
+    cursor.execute("SELECT * FROM master_item_history")
     return cursor.fetchall()
 
-# Save parsed items to both items_master and their respective item-specific tables
+# Save parsed items to both master_item_history and their respective item-specific tables
 def save_to_db(items, conn):
     for item in items:
         item_name = item['Item Name']
         rarity = item['Rarity']
         gold_cost = item['Gold Cost']
 
-        # Insert into the items_master
+        # Insert into the master_item_history
         insert_item_into_master(conn, item_name, rarity, gold_cost)
 
         # Create the item-specific table if it doesn't exist
@@ -96,3 +100,8 @@ def save_to_db(items, conn):
 
         # Insert the details into the item-specific table
         insert_into_item_table(conn, item_name, rarity, gold_cost)
+
+# Function to save parsed items to database
+def save_parsed_items_to_db(conn, items):
+    save_to_db(items, conn)
+
