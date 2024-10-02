@@ -1,10 +1,9 @@
+#data_extraction.py
 import os
 import sqlite3
-import re
 from datetime import datetime
 import cv2
 import pytesseract
-import re
 from PIL import Image
 import numpy as np
 
