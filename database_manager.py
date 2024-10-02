@@ -8,7 +8,7 @@ db_path = os.path.join(os.path.dirname(__file__), 'master-market-database.db')
 
 def create_connection():
     """Create a database connection."""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=60)  # Set timeout to 10 seconds
     return conn
 
 def create_master_table(conn):
